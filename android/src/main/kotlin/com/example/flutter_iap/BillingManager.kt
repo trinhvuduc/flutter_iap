@@ -246,6 +246,19 @@ class BillingManager(private val activity: Activity) {
                 "isPro" to true,
                 "activation" to purchase.purchaseTime
             ))
+            if (!purchase.isAcknowledged) {
+                val params = AcknowledgePurchaseParams.newBuilder()
+                    .setPurchaseToken(purchase.purchaseToken)
+                    .build()
+                billingClient.acknowledgePurchase(params, { billingResult ->
+                        if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                            
+                        } else {
+
+                        }
+                    }
+                )
+            }
         }
     }
 }
