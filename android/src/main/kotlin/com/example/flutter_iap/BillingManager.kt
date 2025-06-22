@@ -188,53 +188,50 @@ class BillingManager(private val activity: Activity) {
         billingClient.queryPurchasesAsync(params) { billingResult, purchasesList ->
             if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
                 
-                // Acknowledge any unacknowledged purchases
-                purchasesList.forEach { purchase ->
-                    if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED && !purchase.isAcknowledged) {
+                // Keep track of unacknowledged purchases that need to be acknowledged
+                val unacknowledgedPurchases = purchasesList.filter { purchase ->
+                    purchase.purchaseState == Purchase.PurchaseState.PURCHASED && !purchase.isAcknowledged
+                }
+                
+                if (unacknowledgedPurchases.isNotEmpty()) {
+                    // Acknowledge unacknowledged purchases
+                    var acknowledgedCount = 0
+                    
+                    unacknowledgedPurchases.forEach { purchase ->
                         val acknowledgePurchaseParams = AcknowledgePurchaseParams.newBuilder()
                             .setPurchaseToken(purchase.purchaseToken)
                             .build()
                             
                         billingClient.acknowledgePurchase(acknowledgePurchaseParams) { _ ->
-                            // Acknowledgment handled
+                            acknowledgedCount++
+                            
+                            // Once all purchases are acknowledged, query again
+                            if (acknowledgedCount == unacknowledgedPurchases.size) {
+                                queryPurchasesAfterAcknowledge(result)
+                            }
                         }
                     }
+                } else {
+                    // No purchases to acknowledge, query directly
+                    queryPurchasesAfterAcknowledge(result)
                 }
-                
-                result.success(true)
+
             } else {
                 result.error("RESTORE_FAILED", "Failed to restore purchases: ${billingResult.debugMessage}", null)
             }
         }
     }
-
-    fun checkRefunded(result: MethodChannel.Result) {
-        val params = QueryPurchaseHistoryParams.newBuilder()
+    
+    private fun queryPurchasesAfterAcknowledge(result: MethodChannel.Result) {
+        val params = QueryPurchasesParams.newBuilder()
             .setProductType(BillingClient.ProductType.SUBS)
             .build()
             
-        billingClient.queryPurchaseHistoryAsync(params) { billingResult, purchaseHistoryRecordList ->
-            if (billingResult.responseCode == BillingClient.BillingResponseCode.OK && purchaseHistoryRecordList != null) {
-                // Query current purchases to compare with history
-                val currentParams = QueryPurchasesParams.newBuilder()
-                    .setProductType(BillingClient.ProductType.SUBS)
-                    .build()
-                    
-                billingClient.queryPurchasesAsync(currentParams) { currentBillingResult, currentPurchasesList ->
-                    if (currentBillingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                        val currentTokens = currentPurchasesList.map { it.purchaseToken }.toSet()
-                        
-                        val hasRefunded = purchaseHistoryRecordList.any { historyRecord ->
-                            !currentTokens.contains(historyRecord.purchaseToken)
-                        }
-                        
-                        result.success(hasRefunded)
-                    } else {
-                        result.error("REFUND_CHECK_FAILED", "Failed to check current purchases: ${currentBillingResult.debugMessage}", null)
-                    }
-                }
+        billingClient.queryPurchasesAsync(params) { billingResult, purchasesList ->
+            if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                result.success(purchasesList.isNotEmpty())
             } else {
-                result.error("REFUND_CHECK_FAILED", "Failed to check purchase history: ${billingResult.debugMessage}", null)
+                result.error("QUERY_FAILED", "Failed to query purchases after acknowledge: ${billingResult.debugMessage}", null)
             }
         }
     }
